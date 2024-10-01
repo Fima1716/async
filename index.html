@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+    <head>
+    	<meta>
+        <title>
+            Управление асинхронным двигателем
+        </title>
+        <style>
+            body {
+                font-size:12pt; 
+                background: linear-gradient(180deg, #f0f0f0, #ceceec);
+                padding:12px;
+            }
+            
+            h3 { 
+                text-align:center;
+            } 
+
+            input {
+                /* color: transparent; */
+                background-color: transparent;
+                /* outline:none; */
+                border: 1px solid #b6b6d6;
+            }
+
+            hr {
+            	margin: 20px 0;
+            	padding: 0;
+            	height: 0;
+            	/* border: none;*/
+            	box-shadow: 0 0 5px 1px #e2e2f0;
+                border: 1px solid #b6b6d6;
+            }
+
+            canvas {
+                border: 1px solid #b6b6d6;
+            }
+        </style>
+    </head>
+    
+    <body>
+        <section>
+            <h3>Ввод параметров двигателя</h3>
+            
+            Напряжение сети: <input id="U" value=380 size=1> В<br>
+            Частота сети: <input id="f" value=50 size=1> Гц<br>
+            Полезная мощность номинальная: <input id="P2" value=10 size=1> Вт<br>
+            Скольжение номинальное: <input id="s_nom" value=3 size=1> %<br>
+            КПД номинальный: <input id="efficiency" value=0.88 size=1> <br>
+            Коэффициент мощности номинальный: <input id="cosfi" value=0.89 size=1> <br>
+            Число пар полюсов: <input id="p" value=1 size=1> <br>
+            Кратность пускового тока: <input id="Ksi" value=7 size=1> <br>
+            Кратность пускового момента: <input id="Ksm" value=1.5 size=1> <br>
+            Кратность максимального момента: <input id="Kmm" value=2.2 size=1> <br>
+            <br>
+            
+            <div style="text-align:center">
+              <input id="set" value="Ввести параметры" type="button" onclick=ParSet()> <br>
+            </div>
+        </section>
+        
+        <hr color="lightgray" size="5">
+
+        <section>
+            <h3 align=center>Управление двигателем</h3>
+            <p id="M_cr1">Критический момент: Н*м</p>
+            Момент нагрузки: <input id="M" value="0" type="number" oninput=MomentSet() min="0" size="1"> Н*м <br><br>
+            
+            <div style="text-align:center">
+                <input id="start" type="button" value="Старт" onclick=Start()>
+                <input id="stop" type="button" value="Стоп" onclick=Stop()> <br>
+            </div>
+        </section>
+    
+        <hr color="lightgray" size="5">
+
+        <section>
+            <h3 align=center>Мониторинг асинхронного двигателя</h3>
+            <p>Механическая характеристика + точка в данный момент</p>
+            <canvas id="canvas" width="500" height="250">
+                 Здесь должен быть &lt;canvas&gt;, но он не поддерживается.
+            </canvas>
+            <p id="M_nagr">Момент нагрузки: 0 Н*м</p>
+            <p id="n">Скорость вращения: 0 об/мин</p>
+        </section>
+    </body>
+    
+    <script>
+        function rounding(number, precision) {
+            return (Math.round(number * (10 ** precision)) / (10 ** precision));
+        }
+        
+        let U, f, P2, s_nom, efficiency, cosfi, p, Ksi, Ksm, Kmm;
+        let n_nom, P1_nom, I1_nom, I_s, M_nom, M_max, M_s, s_cr;
+        let flag_set = 0;
+        
+        function ParSet(){
+            U          = Number(document.getElementById('U').value);
+            f          = Number(document.getElementById('f').value);
+            P2         = Number(document.getElementById('P2').value);
+            s_nom      = Number(document.getElementById('s_nom').value/100);
+            efficiency = Number(document.getElementById('efficiency').value);
+            cosfi      = Number(document.getElementById('cosfi').value);
+            p          = Number(document.getElementById('p').value);
+            Ksi        = Number(document.getElementById('Ksi').value); //коэффициент перегрузки по току
+            Ksm        = Number(document.getElementById('Ksm').value); //коэффициент перегрузки по моменту
+            Kmm        = Number(document.getElementById('Kmm').value); // мвых/мном
+
+            n_nom = 60*f*(1-s_nom)/p; // об/мин
+            P1_nom = P2/efficiency; // кВт
+            I1_nom = P1_nom*10**3/(U*cosfi*(3**0.5)); // А
+            I_s = Ksi*I1_nom; // А
+            M_nom = 9.55*P1_nom*10**3/n_nom; // Н*м
+            M_max = Kmm*M_nom;
+            M_s = Ksm*M_nom;
+            s_cr = s_nom*(Kmm+(Kmm**2-1)**0.5);
+            
+            document.getElementById('M_cr1').textContent = "Критический момент: " + rounding(M_max, 2) + " Н*м";
+            
+            Characteristic();
+            flag_set = 1;
+            // start_stop_flag = 0;
+        }
+
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+        let s = 0, n = 0, M = 0;
+        let scale_M = 3, shift_n = 80;
+        
+        function Characteristic(){
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            NMCount();
+            ctx.beginPath(); 
+            ctx.moveTo(M, n);
+
+            while (s<=1) {
+                NMCount();
+                ctx.lineTo(M, n);
+                s+=0.001;
+            }
+            ctx.strokeStyle = 'black';
+            ctx.stroke();
+
+            ctx.fillStyle = 'black';
+            ctx.font = "20px serif";
+            ctx.fillText("n", 0, 20);
+            ctx.fillText("M", 460, 295);
+            s=0;
+        }
+
+        function NMCount(){
+            n = shift_n + canvas.height - 0.1 * (60*f/p)*(1-s); //canvas.height- для отзеркаливания
+            M = scale_M * 2 * M_max/(s/s_cr+s_cr/s); 
+        }
+
+        let M_nagr;
+        function MomentSet() {
+            M_nagr = scale_M * Number(document.getElementById('M').value); 
+            document.getElementById('M_nagr').textContent = "Момент нагрузки: " + rounding(M/scale_M, 2) + " Н*м";
+
+            if(start_stop_flag == 1)
+                Start();
+        }
+        
+        let start_stop_flag;
+        function Point(colour) {
+            ctx.beginPath();
+            ctx.fillStyle = colour;
+            let r = 3;
+            ctx.arc(M, n, r, 0, 360*Math.PI/180, true); //context.arc(x, y, r, sAngle, eAngle, counterclockwise);
+            ctx.fill();            
+        }
+        
+        function Start() {
+            if(flag_set == 0) 
+                alert("Введите параметры двигателя!");
+            else{
+                start_stop_flag = 1;
+                
+                Characteristic();
+                M = 0;
+                while (M<M_nagr && s<=1) { //до опрокидывания
+                    NMCount(); //обновляю n и M
+                    s+=0.001;
+                }
+                if(s>=1)  
+                    alert("Момент нагрузки превысил критический!");
+                s=0;
+
+                Point('black');
+                document.getElementById('n').textContent = "Скорость вращения: " + rounding(n_nom-n, 2) + " об/мин";
+            }
+        }
+        
+        function Stop() {
+            start_stop_flag = 0;
+            
+            if(flag_set != 0) {
+                Point('red');
+                document.getElementById('n').textContent = "Скорость вращения: " + 0 + " об/мин";                
+            }
+        }
+    </script>
+</html>
